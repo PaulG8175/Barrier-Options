@@ -1,11 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-
+# Box-Muller : génère n*N gaussiennes depuis des uniformes
 def bx_mu(n,N):
     U,V = np.random.rand(n,N),np.random.rand(n,N)
     return np.sqrt(-2*np.log(U))*np.cos(2*np.pi*V)
 
+# CDF de la loi normale centrée réduite (Abramowitz & Stegun)
 def Abramowitz(x):
     if x<0:
         return 1-Abramowitz(-x)
@@ -19,16 +20,17 @@ def Abramowitz(x):
         t = 1/(1+b0*x)
         return 1 - np.exp(-x**2 /2) * (b1*t+b2* t**2 +b3* t**3 +b4* t**4 +b5 * t**5)/np.sqrt(2*np.pi)
 
+# Variance empirique sans biais
 def var_empi(X):
     return np.sum((X-np.mean(X))**2)/(np.size(X)-1)
 
 
-#Q1 : S(t) = S0 * exp((r-sig**2 /2)*t+ sig*Wt)
+# Q1 : S(t) = S0 * exp((r-sig**2 /2)*t+ sig*Wt)
 
-#Q2 : On a : P_euro = -S0*phi(-d1) + K*exp(-r*T)*phi(-d2) avec phi fonction de répartition de N(0,1) et 
-#d1 = (ln(S0/K)+(r+0.5*sig**2)*T)/(sig*sqrt(T)) et d2 = d1 - sig*sqrt(T)
+# Q2 : On a : P_euro = -S0*phi(-d1) + K*exp(-r*T)*phi(-d2) avec phi fonction de répartition de N(0,1) et 
+# d1 = (ln(S0/K)+(r+0.5*sig**2)*T)/(sig*sqrt(T)) et d2 = d1 - sig*sqrt(T)
 
-
+# Paramètres du modèle
 sig = 0.15
 S0=1
 r=0.015
@@ -36,16 +38,22 @@ T=2
 K=1
 q_95 = 1.645
 
-#Q3, Q4 : 
+# ============================================================
+# Q3-Q4) Put européen vanille par MC standard
+# P_euro = e^{-rT} * E[(K - S(T))+]
+# ============================================================
 
+# W(T) = sqrt(T) * eps avec eps ~ N(0,1) via Box-Muller
 def mbs(T,N,eps):
     dt = T/N
     W = np.cumsum(np.sqrt(dt)*eps,axis=1)
     return W
 
+# S(t) = S0 * exp((r - 0.5*sig²)*t + sig*W(t))
 def St(t,S0,sig,r,W):
     return S0*np.exp((r-0.5*sig**2)*t + sig*W)
 
+# Estimateur MC du put européen + IC à 90%
 def P_MC(T,K,r,sig,S0,eps):
     W = mbs(T,1,eps)
     S = St(T,S0,sig,r,W)
@@ -56,16 +64,12 @@ def P_MC(T,K,r,sig,S0,eps):
     return P,IC
 
 
-
-
 n_list = np.array([1000,3000,5000,10000,30000,50000,100000,300000,500000,1000000])
-
-
 
 P_euro_list = np.zeros(np.size(n_list))
 IC_list = np.zeros((np.size(n_list),2))
 
-
+# Prix théorique Black-Scholes du put
 d1 = (np.log(S0/K) + (r+ 0.5* sig**2)*T)/(sig*np.sqrt(T))
 d2 = d1 - sig*np.sqrt(T)
 P_theo = -S0 * Abramowitz(-d1) + K*np.exp(-r*T)*Abramowitz(-d2)
@@ -88,13 +92,14 @@ plt.yscale("log")
 plt.show()
 
 
-
-#Q5 : on pose Xt = ln(St) = ln(S0)+(r- 0.5* sig**2)*t + sig*Wt, et on obtient min(Su)>= B <=> min(Xu)>=ln(B)
+# Q5 : on pose Xt = ln(St) = ln(S0)+(r- 0.5* sig**2)*t + sig*Wt, et on obtient min(Su)>= B <=> min(Xu)>=ln(B)
 # en remarquant que  1{minS>=B} = 1 - 1{minS<=B}, on peut transformer P_DO, en un put classique et P_DO mais inversé (min(S)<=B)
 
-
-
-#Q6 : 
+# ============================================================
+# Q6) Put Down-and-Out par MC discret
+# P_DO,delta = e^{-rT} * E[(K-S(T))+ * 1_{min_{Ti} S(Ti) >= B}]
+# On simule N_delta pas de taille delta=1/52 (hebdomadaire)
+# ============================================================
 
 B=0.7
 delta = 1/52
@@ -106,6 +111,7 @@ def PDO_delta(T,K,r,sig,S0,B,eps):
     W = mbs(T,N_delta,eps)
     S_u = St(T_i,S0,sig,r,W)
 
+    # Payoff nul si le minimum discret des S(Ti) passe sous B
     PDO_list = np.exp(-r*T)*np.maximum(K-S_u[:,-1],0)*(np.min(S_u,axis=1)>=B)
     PDO_delt = np.mean(PDO_list)
 
@@ -119,8 +125,10 @@ eps = bx_mu(1,N_delta)
 W = mbs(T,N_delta,eps)
 
 
-#Q7 : 
-
+# ============================================================
+# Q7) Réduction de variance par variables antithétiques
+# On moyenne les payoffs de (W) et (-W)
+# ============================================================
 
 def PDO_delta_anti(T,K,r,sig,S0,B,eps):
     W = mbs(T,N_delta,eps)
@@ -129,6 +137,7 @@ def PDO_delta_anti(T,K,r,sig,S0,B,eps):
 
     PDO_list_plus = np.exp(-r*T)*np.maximum(K-S_u_plus[:,-1],0)*(np.min(S_u_plus,axis=1)>=B)
     PDO_list_moins = np.exp(-r*T)*np.maximum(K-S_u_moins[:,-1],0)*(np.min(S_u_moins,axis=1)>=B)
+    # Estimateur antithétique : moyenne des deux payoffs
     PDO_list = 0.5*(PDO_list_plus+PDO_list_moins)
     PDO = np.mean(PDO_list)
 
@@ -138,10 +147,8 @@ def PDO_delta_anti(T,K,r,sig,S0,B,eps):
     return PDO,IC
 
 
-
 n_list = np.array([1000,3000,5000,10000,30000,50000,100000,300000,500000,1000000])
 nbr_tra = np.size(n_list)
-
 
 PDO_list = np.zeros(nbr_tra)
 PDO_anti_list = np.zeros(nbr_tra)
@@ -174,13 +181,8 @@ d'après la théorie car (K-S(T))+ * 1{minS(u)>=B} <=(K-S(T))+
 """
 
 
-#Q8 : 
-
-"""
-Pour n=1e5, on voit que l'IC 90% a une longueur d'environ de 0.00018, c'est à dire qu'à 90% de chance, on a une erreur d'environ de 0.3%.
-Cette approximation est largement suffisante par rapport à la puissance nécessaire.
-"""
-
+# Q8 : N=1e5 → IC 90% de longueur ≈ 0.018% → précision suffisante
+# P_DO,delta décroît avec B : plus B est petit, plus le put DO ressemble au put vanille
 
 n=100000
 nbr_B = 50
@@ -205,8 +207,9 @@ en effet plus B est petit, plus la proba que minS(u)>=B est grande.
 """
 
 
-#Q9 : 
-
+# Q9 : effet de sigma sur P_DO pour deux valeurs de S0
+# S0=1 : si sigma→0, S reste proche de 1 >> B → P_DO → 0
+# S0=0.8 : si sigma→0, S reste proche de 0.8 > B → put ITM mais sans risque de barrière → P_DO > 0
 
 n=10000
 B=0.7
@@ -240,8 +243,11 @@ De plus, les deux courbes tendent vers 0 lorsque sigma tend vers 0.8, ce qui exp
 aille au moins une fois en dessous de B ets élevé.
 """
 
-#Q10 : 
-
+# ============================================================
+# Q10) Correction Brownian Bridge
+# P[inf_{u in [t1,t2]} W_u < x* | W_t1, W_t2] = exp(-2*(W_t1-x*)*(W_t2-x*)/(t2-t1))
+# On pondère chaque payoff par la probabilité de survie continue entre observations
+# ============================================================
 
 sig=0.15
 
@@ -249,11 +255,14 @@ def PDO_10(T,K,r,sig,S0,B,eps):
     W = mbs(T,N_delta,eps)
     S_u = St(T_i,S0,sig,r,W)
 
+    # Probabilité de passage sous B entre deux observations consécutives (pont brownien)
     indicatrice = (S_u[:,1:]>B)&(S_u[:,:-1]>B)
     pi = np.exp(-2*(np.log(S_u[:,1:]/B)*np.log(S_u[:,:-1]/B))/(sig**2 *dt))
     pi_OK = np.where(indicatrice,pi,1.0)
+    # Probabilité de survie continue sur [0,T] = produit des probabilités de survie par intervalle
     proba_OK = np.exp(np.sum(np.log(np.clip(1 - pi_OK,1e-300,1.0)),axis=1))
     payoff = np.maximum(K-S_u[:,-1],0.0)
+    # Si knock-out discret détecté, payoff nul ; sinon pondéré par la proba de survie continue
     payoff_OK = np.where(np.any(S_u[:,1:]<B,axis=1),0.0,payoff*proba_OK)
 
     PDO_list = np.exp(-r*T) * payoff_OK
@@ -290,14 +299,8 @@ plt.ylabel("prix de l'option")
 plt.show()
 
 
-#Q11 : 
-
-"""
-On voit que pour n=3*1e5 et pour delta = 1/52, à l'aide de la taille de l'IC 90%, on a une erreur normalisé de 1%
-On va donc prendre cette valeur de n pour la suite.
-"""
-
-
+# Q11 : convergence de P_DO,delta vers P_DO en fonction de delta
+# La correction Brownian Bridge (PDO_10) converge bien plus vite que le MC discret brut
 
 n=100000
 
@@ -327,8 +330,12 @@ plt.yscale("log")
 plt.show()
 
 
-#Q12 : 
-
+# ============================================================
+# Q12) Probabilité de non-sortie zeta_DO
+# zeta_discret : fraction de trajectoires dont le min discret >= B
+# zeta_continue (BB) : corrigé du biais de discrétisation via pont brownien
+# Valeur théorique : formule fermée basée sur le réflexion du mouvement brownien
+# ============================================================
 
 def zeta_delta(T,r,sig,S0,B,eps,N_delta,T_i):
     W = mbs(T,N_delta,eps)
@@ -340,7 +347,7 @@ def zeta_delta_10(T,r,sig,S0,B,eps,N_delta,T_i,dt):
     W = mbs(T,N_delta,eps)
     S_u = St(T_i,S0,sig,r,W)
 
-    KO = np.any(S_u<B,axis=1)
+    KO = np.any(S_u<B,axis=1)  # knock-out discret détecté
     indicatrice = (S_u[:, 1:]>B)&(S_u[:,:-1]>B) 
     pi = np.exp(-2*(np.log(S_u[:,1:]/B)*np.log(S_u[:,:-1]/B))/(sig**2 *dt))
     pi_OK = np.where(indicatrice,pi,1.0)
@@ -349,9 +356,9 @@ def zeta_delta_10(T,r,sig,S0,B,eps,N_delta,T_i,dt):
     return zeta
 
 
-
 zeta_delta_list = np.zeros(np.size(delta_list))
 zeta_delta_10_list = np.zeros(np.size(delta_list))
+# Formule fermée de la probabilité de non-sortie (formule de réflexion du BM)
 mu = r - 0.5* sig**2
 d1 = (np.log(S0/B) + mu*T)/(sig*np.sqrt(T))
 d2 = (np.log(B/S0) + mu*T)/(sig*np.sqrt(T))
@@ -385,19 +392,15 @@ confirmant que la correction Brownian Bridge élimine le biais de discrétisatio
 """
 
 
-#Q13 : 
+# Q13 : P_DO + P_DI = P_euro car 1{minS>=B} + 1{minS<=B} = 1 p.s.
+# => P_DI = P_euro - P_DO (variable de contrôle à espérance connue)
 
-"""
-On a 1{minS(u)>=B}+1{minS(u)<=B} = 1 ps (1{minS(u)=B} est nul ps). Donc P_DO + P_DI = exp(-r*T)*E[(K-S(T))+] = P_euro
-"""
-
-
-#Q14 : 
-
-
-"""
-Le principal paramètre du contrat discriminant l'efficacité de cette réduction de variance est B
-"""
+# ============================================================
+# Q14) Variable de contrôle : P_DI = P_euro - P_DO
+# Z = P_DO + (P_DI - E[P_DI]) = P_euro - P_DI_MC + E[P_DI]
+# Efficace quand B petit : P_DI ≈ 0, Var(P_DI) ≈ 0 → forte réduction
+# Inefficace quand B ≈ K : P_DO et P_DI ont des variances comparables
+# ============================================================
 
 d1 = (np.log(S0/K) + (r+ 0.5* sig**2)*T)/(sig*np.sqrt(T))
 d2 = d1 - sig*np.sqrt(T)
@@ -414,6 +417,7 @@ B_list = np.linspace(0.5,1,nbr_B)
 var_MC_list = np.zeros(nbr_B)
 var_CV_list = np.zeros(nbr_B)
 
+# Même trajectoires pour les deux estimateurs (variables communes)
 eps = bx_mu(n,N_delta)
 W = mbs(T,N_delta,eps)
 S_u = St(T_i,S0,sig,r,W)
@@ -423,7 +427,7 @@ for i,B in enumerate(B_list):
     P_DI_list = payoff * (np.min(S_u,axis=1)<=B)
 
     var_MC_list[i] = var_empi(payoff*(np.min(S_u,axis=1)>=B))
-    var_CV_list[i] = var_empi(P_theo - P_DI_list)
+    var_CV_list[i] = var_empi(P_theo - P_DI_list)  # P_DO = P_euro - P_DI
 
 plt.figure()
 plt.title("Variance estimateurs P_DO en fonction de B")
@@ -433,7 +437,6 @@ plt.legend()
 plt.xlabel("B")
 plt.ylabel("Var")
 plt.show()
-
 
 
 """
